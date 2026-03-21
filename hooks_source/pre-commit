@@ -1,0 +1,34 @@
+#!/bin/bash
+
+#Define Color Variables
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color (Reset)
+
+echo -e "${BLUE}[Vault Scanner]${NC} Intercepting commit..."
+
+STAGED_FILES=$(git diff --cached --name-only)
+
+if [ -z "$STAGED_FILES" ]; then
+  echo -e "${GREEN}[OK]${NC} No files staged. Proceeding."
+  exit 0
+fi
+
+echo -e "${YELLOW}[INFO]${NC} Handing files over to the C++ Engine..."
+
+# Pass the staged files to the compiled C++ binary
+./vault_scanner $STAGED_FILES
+
+# Capture the exit code of the C++ program
+SCANNER_EXIT_CODE=$?
+
+# If the C++ program returned 1, block the commit
+if [ $SCANNER_EXIT_CODE -ne 0 ]; then
+  echo -e "\n${RED}[FATAL ERROR]${NC} Commit blocked by Vault Engine!"
+  exit 1
+fi
+
+echo -e "${GREEN}[OK]${NC} Code is clean. Committing..."
+exit 0
