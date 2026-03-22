@@ -77,11 +77,17 @@ bool scanAndMutateFile(const std::string& filepath) {
     tempFile.close();
 
     if (leakFoundAndBlocked) {
-        std::remove(filepath.c_str());
-        std::rename(tempFilepath.c_str(), filepath.c_str());
-    } else {
-        std::remove(tempFilepath.c_str());
+        std::ifstream src(tempFilepath, std::ios::binary);
+        std::ofstream dst(filepath, std::ios::binary | std::ios::trunc);
+        
+        dst << src.rdbuf();
+        
+        src.close();
+        dst.close();
     }
+    
+    //clean up the temporary file
+    std::remove(tempFilepath.c_str()); 
 
     return leakFoundAndBlocked;
 }
