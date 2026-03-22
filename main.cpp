@@ -3,79 +3,104 @@
 #include <string>
 #include <vector>
 #include <regex>
+#include <cstdlib> // For system commands
+#include <ctime>   // For generating unique keys
 
 const std::string RED = "\033[0;31m";
 const std::string GREEN = "\033[0;32m";
 const std::string YELLOW = "\033[1;33m";
+const std::string CYAN = "\033[0;36m";
 const std::string NC = "\033[0m"; 
 
-// AWS Access Key
 const std::regex AWS_REGEX("AKIA[0-9A-Z]{16}");
-
-// Stripe Live Token
 const std::regex STRIPE_REGEX("sk_live_[0-9a-zA-Z]{24}");
-
-// RSA Private Key: Matches the standard header of a private SSH/Encryption key.
-const std::regex RSA_REGEX("-----BEGIN (RSA|OPENSSH) PRIVATE KEY-----");
 
 const std::vector<std::pair<std::string, std::regex>> SECRET_PATTERNS = {
     {"AWS Access Key", AWS_REGEX},
-    {"Stripe Live Token", STRIPE_REGEX},
-    {"Private SSH/RSA Key", RSA_REGEX}
+    {"Stripe Live Token", STRIPE_REGEX}
 };
 
-bool scanFile(const std::string& filepath) {
+bool scanAndMutateFile(const std::string& filepath) {
     std::ifstream file(filepath);
-    
-    if (!file.is_open()) {
-        std::cerr << RED << "[ERROR]" << NC << " Could not open: " << filepath << "\n";
-        return false; 
-    }
+    if (!file.is_open()) return false;
 
+    std::string tempFilepath = filepath + ".tmp";
+    std::ofstream tempFile(tempFilepath);
+    
     std::string line;
     int lineNumber = 1;
-    bool leakFound = false;
+    bool leakFoundAndBlocked = false;
 
-    // Stream the file line by line
     while (std::getline(file, line)) {
-        
-        // Check the current line against every regex pattern in our dictionary
-        for (const auto& patternPair : SECRET_PATTERNS) {
-            const std::string& secretName = patternPair.first;
-            const std::regex& regexPattern = patternPair.second;
+        bool lineMutated = false;
 
-            // std::regex_search returns true if the pattern exists ANYWHERE in the line
-            if (std::regex_search(line, regexPattern)) {
-                std::cout << RED << secretName << " DETECTED! " << NC 
-                          << "\n   -> File: " << filepath 
-                          << "\n   -> Line: " << lineNumber << "\n\n";
-                leakFound = true;
+        for (const auto& patternPair : SECRET_PATTERNS) {
+            std::smatch match;
+            
+            if (std::regex_search(line, match, patternPair.second)) {
+                std::cout << RED << "\n" << patternPair.first << " DETECTED! " << NC 
+                          << "\n   -> File: " << filepath << " (Line " << lineNumber << ")\n";
+                
+                std::cout << CYAN << "   -> Move this secret to the .env Vault? (y/n): " << NC;
+                char choice;
+                std::cin >> choice;
+
+                if (choice == 'y' || choice == 'Y') {
+                    std::string rawSecret = match.str(0);
+                    
+                    // Generate a unique variable name based on time
+                    std::string vaultVarName = "VAULT_SEC_" + std::to_string(std::time(0));
+                    
+                    // Append the raw secret to the .env file
+                    std::ofstream envFile(".env", std::ios_base::app);
+                    envFile << vaultVarName << "=\"" << rawSecret << "\"\n";
+                    envFile.close();
+
+                    // Replace the raw secret in the code with the environment variable
+                    std::string safeReplacement = "process.env." + vaultVarName;
+                    line = std::regex_replace(line, patternPair.second, safeReplacement);
+                    
+                    std::cout << GREEN << "   [OK] Secret vaulted securely as " << vaultVarName << NC << "\n";
+                    lineMutated = true;
+                    leakFoundAndBlocked = true;
+                } else {
+                    std::cout << YELLOW << "   [WARNING] Secret left exposed. Blocking commit.\n" << NC;
+                    leakFoundAndBlocked = true;
+                }
             }
         }
+        tempFile << line << "\n";
         lineNumber++;
     }
 
-    return leakFound;
+    file.close();
+    tempFile.close();
+
+    if (leakFoundAndBlocked) {
+        std::remove(filepath.c_str());
+        std::rename(tempFilepath.c_str(), filepath.c_str());
+    } else {
+        std::remove(tempFilepath.c_str());
+    }
+
+    return leakFoundAndBlocked;
 }
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        return 0; 
-    }
+    if (argc < 2) return 0; 
 
     bool commitBlocked = false;
 
-    // Loop through all staged files
     for (int i = 1; i < argc; ++i) {
-        std::string filepath = argv[i];
-        if (scanFile(filepath)) {
+        if (scanAndMutateFile(argv[i])) {
             commitBlocked = true;
         }
     }
 
     if (commitBlocked) {
-        return 1;
+        std::cout << RED << "\n[FATAL ERROR] Commit blocked. Please review vaulted files and re-stage them.\n" << NC;
+        return 1; 
     }
 
-    return 0;
+    return 0; 
 }
