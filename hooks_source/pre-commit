@@ -19,7 +19,7 @@ fi
 echo -e "${YELLOW}[INFO]${NC} Handing files over to the C++ Engine..."
 
 # Pass the staged files to the compiled C++ binary
-./vault_scanner $STAGED_FILES
+./vault_scanner $STAGED_FILES < /dev/tty
 
 # Capture the exit code of the C++ program
 SCANNER_EXIT_CODE=$?
