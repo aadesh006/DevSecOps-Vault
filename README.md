@@ -34,6 +34,7 @@ The tool orchestrates communication between Git, the Operating System, and the c
    ```bash
    ./install.sh
    ```
+   ![App Screenshot](assets/installer.png)
 
 ## Usage
 
@@ -56,10 +57,13 @@ AWS Access Key DETECTED!
 [FATAL ERROR] Commit blocked. Please review vaulted files and re-stage them.
 Simply run git add . to stage the newly mutated, safe files, and run your commit again!
 ```
+![App Screenshot](assets/Vault-Intercept.png)
 ## Tech Stack
 
 * **Core Engine: C++ (Standard Template Library, <regex>, <fstream>)**
 * **Process Management: Bash Shell Scripting, Git Internals, ANSI Escape Codes**
 * **Architecture: Custom CLI Tooling, OS-level Exit Code routing**
+
+---
 
 Built by Aadesh Chaudhari
