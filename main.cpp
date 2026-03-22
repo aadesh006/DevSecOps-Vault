@@ -57,7 +57,19 @@ bool scanAndMutateFile(const std::string& filepath) {
                     envFile.close();
 
                     // Replace the raw secret in the code with the environment variable
-                    std::string safeReplacement = "process.env." + vaultVarName;
+                    std::string safeReplacement;
+                    if (filepath.find(".js") != std::string::npos || filepath.find(".ts") != std::string::npos) {
+                        safeReplacement = "process.env." + vaultVarName;
+                    } else if (filepath.find(".py") != std::string::npos) {
+                        safeReplacement = "os.environ.get('" + vaultVarName + "')";
+                    } else if (filepath.find(".cpp") != std::string::npos) {
+                        safeReplacement = "std::getenv(\"" + vaultVarName + "\")";
+                    } else {
+                        // A generic fallback for unsupported languages
+                        safeReplacement = "<" + vaultVarName + "_INSERT_ENV_HERE>"; 
+                    }
+
+                    line = std::regex_replace(line, patternPair.second, safeReplacement);
                     line = std::regex_replace(line, patternPair.second, safeReplacement);
                     
                     std::cout << GREEN << "  [OK] Line " << lineNumber << " mutated. Secret replaced with: " << CYAN << safeReplacement << NC << "\n";
