@@ -60,7 +60,7 @@ bool scanAndMutateFile(const std::string& filepath) {
                     std::string safeReplacement = "process.env." + vaultVarName;
                     line = std::regex_replace(line, patternPair.second, safeReplacement);
                     
-                    std::cout << GREEN << "   [OK] Secret vaulted securely as " << vaultVarName << NC << "\n";
+                    std::cout << GREEN << "  [OK] Line " << lineNumber << " mutated. Secret replaced with: " << CYAN << safeReplacement << NC << "\n";
                     lineMutated = true;
                     leakFoundAndBlocked = true;
                 } else {
