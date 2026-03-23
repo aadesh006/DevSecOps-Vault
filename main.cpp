@@ -12,12 +12,56 @@ const std::string YELLOW = "\033[1;33m";
 const std::string CYAN   = "\033[0;36m";
 const std::string NC     = "\033[0m";
 
-const std::regex AWS_REGEX("AKIA[0-9A-Z]{16}");
-const std::regex STRIPE_REGEX("sk_live_[0-9a-zA-Z]{24}");
-
 const std::vector<std::pair<std::string, std::regex>> SECRET_PATTERNS = {
-    {"AWS Access Key",    AWS_REGEX},
-    {"Stripe Live Token", STRIPE_REGEX}
+ 
+    { "AWS Access Key ID",
+      std::regex("AKIA[0-9A-Z]{16}") },
+ 
+    { "Google API Key",
+      std::regex("AIza[0-9A-Za-z\\-_]{35}") },
+ 
+    { "Stripe Live Secret Key",
+      std::regex("sk_live_[0-9a-zA-Z]{24,}") },
+ 
+    { "Stripe Test Secret Key",
+      std::regex("sk_test_[0-9a-zA-Z]{24,}") },
+ 
+    { "GitHub Personal Access Token (classic)",
+      std::regex("ghp_[A-Za-z0-9]{36,}") },
+ 
+    { "GitHub Fine-Grained PAT",
+      std::regex("github_pat_[A-Za-z0-9_]{82,}") },
+ 
+    { "Slack Bot Token",
+      std::regex("xoxb-[0-9]{10,13}-[0-9]{10,13}-[A-Za-z0-9]{24,26}") },
+ 
+    { "Slack User Token",
+      std::regex("xoxp-[0-9A-Za-z\\-]{60,}") },
+ 
+    { "Slack Incoming Webhook",
+      std::regex("https://hooks\\.slack\\.com/services/T[A-Za-z0-9_]+/B[A-Za-z0-9_]+/[A-Za-z0-9_]+") },
+ 
+    { "OpenAI API Key",
+      std::regex("sk-[A-Za-z0-9]{48,}") },
+ 
+    { "Anthropic API Key",
+      std::regex("sk-ant-[A-Za-z0-9\\-_]{90,}") },
+ 
+    { "SendGrid API Key",
+      std::regex("SG\\.[A-Za-z0-9_\\-]{22,}\\.[A-Za-z0-9_\\-]{40,}") },
+ 
+    { "Twilio Account SID",
+      std::regex("AC[a-f0-9]{32}") },
+ 
+    { "Mailgun API Key",
+      std::regex("key-[a-zA-Z0-9]{32}") },
+ 
+    { "NPM Access Token",
+      std::regex("npm_[A-Za-z0-9]{36,}") },
+
+    { "PEM Private Key Block",
+      std::regex("-----BEGIN [A-Z ]*PRIVATE KEY-----") },
+ 
 };
 
 // Global counter to guarantee unique variable names even within the
