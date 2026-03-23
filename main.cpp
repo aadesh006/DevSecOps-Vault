@@ -3,22 +3,66 @@
 #include <string>
 #include <vector>
 #include <regex>
-#include <cstdlib> // For system commands
-#include <ctime>   // For generating unique keys
+#include <cstdlib>
+#include <ctime>
 
-const std::string RED = "\033[0;31m";
-const std::string GREEN = "\033[0;32m";
+const std::string RED    = "\033[0;31m";
+const std::string GREEN  = "\033[0;32m";
 const std::string YELLOW = "\033[1;33m";
-const std::string CYAN = "\033[0;36m";
-const std::string NC = "\033[0m"; 
+const std::string CYAN   = "\033[0;36m";
+const std::string NC     = "\033[0m";
 
 const std::regex AWS_REGEX("AKIA[0-9A-Z]{16}");
 const std::regex STRIPE_REGEX("sk_live_[0-9a-zA-Z]{24}");
 
 const std::vector<std::pair<std::string, std::regex>> SECRET_PATTERNS = {
-    {"AWS Access Key", AWS_REGEX},
+    {"AWS Access Key",    AWS_REGEX},
     {"Stripe Live Token", STRIPE_REGEX}
 };
+
+// Global counter to guarantee unique variable names even within the
+static int vaultCounter = 0;
+
+std::string generateVaultVarName() {
+    return "VAULT_SEC_" + std::to_string(std::time(0)) + "_" + std::to_string(++vaultCounter);
+}
+
+std::string buildSafeReplacement(const std::string& filepath,
+                                  const std::string& vaultVarName) {
+    if (filepath.find(".js")  != std::string::npos ||
+        filepath.find(".ts")  != std::string::npos) {
+        return "process.env." + vaultVarName;
+    } else if (filepath.find(".py") != std::string::npos) {
+        return "os.environ.get('" + vaultVarName + "')";
+    } else if (filepath.find(".cpp") != std::string::npos) {
+        return "std::getenv(\"" + vaultVarName + "\")";
+    } else {
+        return "<" + vaultVarName + "_INSERT_ENV_HERE>";
+    }
+}
+
+std::string stripQuotedSecret(const std::string& line,
+                               const std::string& rawSecret,
+                               const std::string& safeReplacement) {
+    std::string result = line;
+
+    // Try to find the secret wrapped in double quotes first, then single quotes.
+    for (char q : {'"', '\''}) {
+        std::string quoted = std::string(1, q) + rawSecret + std::string(1, q);
+        size_t pos = result.find(quoted);
+        if (pos != std::string::npos) {
+            result.replace(pos, quoted.size(), safeReplacement);
+            return result;
+        }
+    }
+
+    // Fallback: secret is not quoted — replace it bare.
+    size_t pos = result.find(rawSecret);
+    if (pos != std::string::npos) {
+        result.replace(pos, rawSecret.size(), safeReplacement);
+    }
+    return result;
+}
 
 bool scanAndMutateFile(const std::string& filepath) {
     std::ifstream file(filepath);
@@ -26,54 +70,39 @@ bool scanAndMutateFile(const std::string& filepath) {
 
     std::string tempFilepath = filepath + ".tmp";
     std::ofstream tempFile(tempFilepath);
-    
+
     std::string line;
     int lineNumber = 1;
     bool leakFoundAndBlocked = false;
 
     while (std::getline(file, line)) {
-        bool lineMutated = false;
-
         for (const auto& patternPair : SECRET_PATTERNS) {
             std::smatch match;
-            
+
             if (std::regex_search(line, match, patternPair.second)) {
-                std::cout << RED << "\n" << patternPair.first << " DETECTED! " << NC 
+                std::cout << RED << "\n" << patternPair.first << " DETECTED! " << NC
                           << "\n   -> File: " << filepath << " (Line " << lineNumber << ")\n";
-                
+
                 std::cout << CYAN << "   -> Move this secret to the .env Vault? (y/n): " << NC;
                 char choice;
                 std::cin >> choice;
 
                 if (choice == 'y' || choice == 'Y') {
-                    std::string rawSecret = match.str(0);
-                    
-                    // Generate a unique variable name based on time
-                    std::string vaultVarName = "VAULT_SEC_" + std::to_string(std::time(0));
-                    
-                    // Append the raw secret to the .env file
+                    std::string rawSecret    = match.str(0);
+                    std::string vaultVarName = generateVaultVarName(); // FIX 1
+                    std::string safeReplacement = buildSafeReplacement(filepath, vaultVarName);
+
+                    // Append the raw secret to .env
                     std::ofstream envFile(".env", std::ios_base::app);
                     envFile << vaultVarName << "=\"" << rawSecret << "\"\n";
                     envFile.close();
 
-                    // Replace the raw secret in the code with the environment variable
-                    std::string safeReplacement;
-                    if (filepath.find(".js") != std::string::npos || filepath.find(".ts") != std::string::npos) {
-                        safeReplacement = "process.env." + vaultVarName;
-                    } else if (filepath.find(".py") != std::string::npos) {
-                        safeReplacement = "os.environ.get('" + vaultVarName + "')";
-                    } else if (filepath.find(".cpp") != std::string::npos) {
-                        safeReplacement = "std::getenv(\"" + vaultVarName + "\")";
-                    } else {
-                        // A generic fallback for unsupported languages
-                        safeReplacement = "<" + vaultVarName + "_INSERT_ENV_HERE>"; 
-                    }
+                    line = stripQuotedSecret(line, rawSecret, safeReplacement);
 
-                    line = std::regex_replace(line, patternPair.second, safeReplacement);
-                    line = std::regex_replace(line, patternPair.second, safeReplacement);
-                    
-                    std::cout << GREEN << "  [OK] Line " << lineNumber << " mutated. Secret replaced with: " << CYAN << safeReplacement << NC << "\n";
-                    lineMutated = true;
+                    std::cout << GREEN << "  [OK] Line " << lineNumber
+                              << " mutated. Secret replaced with: "
+                              << CYAN << safeReplacement << NC << "\n";
+
                     leakFoundAndBlocked = true;
                 } else {
                     std::cout << YELLOW << "   [WARNING] Secret left exposed. Blocking commit.\n" << NC;
@@ -89,23 +118,20 @@ bool scanAndMutateFile(const std::string& filepath) {
     tempFile.close();
 
     if (leakFoundAndBlocked) {
+        // Overwrite the original file using binary streams
         std::ifstream src(tempFilepath, std::ios::binary);
-        std::ofstream dst(filepath, std::ios::binary | std::ios::trunc);
-        
+        std::ofstream dst(filepath,     std::ios::binary | std::ios::trunc);
         dst << src.rdbuf();
-        
         src.close();
         dst.close();
     }
-    
-    //clean up the temporary file
-    std::remove(tempFilepath.c_str()); 
 
+    std::remove(tempFilepath.c_str());
     return leakFoundAndBlocked;
 }
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) return 0; 
+    if (argc < 2) return 0;
 
     bool commitBlocked = false;
 
@@ -116,9 +142,10 @@ int main(int argc, char* argv[]) {
     }
 
     if (commitBlocked) {
-        std::cout << RED << "\n[FATAL ERROR] Commit blocked. Please review vaulted files and re-stage them.\n" << NC;
-        return 1; 
+        std::cout << RED << "\n[FATAL ERROR] Commit blocked. Please review vaulted files and re-stage them.\n"
+                  << "Simply run: git add . — then commit again.\n" << NC;
+        return 1;
     }
 
-    return 0; 
+    return 0;
 }
