@@ -1,69 +1,174 @@
 # DevSecOps Vault
 
-A blazing-fast, C++ powered Git pre-commit hook that proactively intercepts, vaults, and mutates hardcoded secrets before they reach version control.
+> A blazing-fast, C++-powered Git pre-commit hook that intercepts hardcoded secrets *before* they ever reach version control.
 
-## Overview
-Credential leakage is one of the leading causes of enterprise security breaches. **DevSecOps Vault** acts as a local emergency brake for developers. Instead of relying on cloud-based secret scanning *after* a push, this tool hooks directly into the local Git OS process. 
+---
 
-If a developer accidentally stages a high-entropy secret (like an AWS Access Key or Stripe Token), the Vault freezes the commit in milliseconds, extracts the secret to a local, untracked `.env` file, and automatically rewrites the original source code to use safe environment variables.
+## The Problem
+
+Credential leakage is one of the leading causes of enterprise security breaches. Most secret scanning tools operate *after* a push to a remote — by which point the damage is already done. **DevSecOps Vault** moves that checkpoint to the very first line of defense: your local machine, at the moment of `git commit`.
+
+---
+
+## How It Works
+
+When you run `git commit`, the Vault silently activates and runs through a four-stage pipeline:
+
+```
+git commit
+    │
+    ▼
+[1] pre-commit hook (Bash)
+    │  Captures staged files via `git diff --cached`
+    │
+    ▼
+[2] vault_scanner (C++ Binary)
+    │  Streams each file line-by-line
+    │  Evaluates against the secret pattern dictionary
+    │
+    ▼
+[3] Mutator (C++ File I/O)
+    │  Extracts the raw secret → writes to .env
+    │  Rewrites source file with the correct env variable syntax
+    │
+    ▼
+[4] Gatekeeper
+       Returns exit code 0 (clean) or 1 (blocked) back to Git
+```
+
+---
 
 ## Key Features
-* **Ultra-Low Latency Engine:** The core scanning engine is compiled in C++, ensuring the pre-commit hook executes in under 10ms so it doesn't interrupt the developer workflow.
-* **Advanced Regex Detection:** Utilizes the C++ `<regex>` library to hunt down high-entropy strings and mathematical patterns matching AWS, Stripe, GitHub, Slack, and Google Cloud credentials.
-* **Language-Aware Mutator:** The auto-mutator intelligently reads file extensions (`.js`, `.ts`, `.py`, `.cpp`) and injects the correct syntax for that specific language (e.g., `process.env.VAR`, `os.environ.get()`, `std::getenv()`).
-* **Frictionless Vaulting:** Automatically generates a secure `.env` file, creates a unique time-stamped variable, and safely scrubs the original source file via binary stream overwriting to prevent OS file-lock bugs.
-* **Seamless Distribution:** Includes an automated bash installer that wires up the OS-level Git hooks without requiring manual developer configuration.
 
-## System Architecture
+- **Sub-10ms Execution** — The core scanning engine is compiled C++, so it never interrupts your workflow.
+- **Multi-Pattern Detection** — Regex-based detection for AWS Access Keys (`AKIA...`), Stripe Live Tokens (`sk_live_...`), with an extensible pattern dictionary.
+- **Language-Aware Mutation** — The mutator reads the file extension and injects the correct syntax automatically:
 
-The tool orchestrates communication between Git, the Operating System, and the compiled C++ binary:
+  | Extension      | Replacement Syntax                          |
+  |----------------|---------------------------------------------|
+  | `.js` / `.ts`  | `process.env.VAULT_SEC_<timestamp>`         |
+  | `.py`          | `os.environ.get('VAULT_SEC_<timestamp>')`   |
+  | `.cpp`         | `std::getenv("VAULT_SEC_<timestamp>")`      |
+  | Other          | `<VAULT_SEC_<timestamp>_INSERT_ENV_HERE>`   |
 
-1. **The Interceptor (`pre-commit` shell script):** Git triggers the shell script upon `git commit`. The script queries `git diff --cached` and passes staged files to the engine.
-2. **The Scanner (`vault_scanner` C++ binary):** Streams file contents line-by-line (for memory efficiency) and evaluates them against the threat dictionary.
-3. **The Mutator (C++ File I/O):** If a threat is found, standard input (`/dev/tty`) is reattached for interactive prompting. Upon approval, it utilizes binary file streams to overwrite the source code and update the `.env` vault.
-4. **The Gatekeeper:** Returns an OS-level exit code (`0` for success, `1` for blocked) back to Git to finalize or abort the commit process.
+- **Automatic .env Vaulting** — Detected secrets are timestamped, named uniquely, and appended to a local `.env` file that stays untracked.
+- **Binary Stream Overwriting** — Uses binary file streams to overwrite source files, avoiding OS file-lock issues.
+- **One-Command Setup** — The installer handles compilation and Git hook wiring automatically.
+
+---
 
 ## Installation
 
-1. Clone this repository or download the source code into your project root.
-2. Compile the C++ scanning engine:
-   ```bash
-   g++ main.cpp -o vault_scanner
-   ```
-3. Run the automated installer to wire up the Git hooks:
-   ```bash
-   ./install.sh
-   ```
-   ![App Screenshot](assets/installer.png)
+### Prerequisites
+
+- A Unix-like environment (Linux / macOS)
+- `g++` with C++11 support or later
+- An initialized Git repository
+
+### Steps
+
+**1. Clone or copy the source into your project root.**
+
+**2. Compile the C++ engine:**
+```bash
+g++ main.cpp -o vault_scanner
+```
+
+**3. Run the installer:**
+```bash
+./install.sh
+```
+
+The installer will:
+- Verify a `.git` directory is present
+- Copy the pre-commit hook to `.git/hooks/pre-commit`
+- Set executable permissions on the hook
+
+That's it. The Vault is now active on every commit.
+
+---
 
 ## Usage
 
-Once installed, the Vault runs invisibly in the background. Just commit your code normally:
+Work normally. The Vault runs invisibly in the background.
 
 ```bash
 git add script.py
-git commit -m "Added new database connection"
+git commit -m "Added database connection"
 ```
-If a secret is detected, the Vault will intercept the terminal:
-```plaintext
+
+**If a clean commit — no output, proceeds normally:**
+```
+[Vault Scanner] Intercepting commit...
+[INFO] Handing files over to the C++ Engine...
+[OK] Code is clean. Committing...
+```
+
+**If a secret is detected, the Vault freezes the commit:**
+```
 [Vault Scanner] Intercepting commit...
 [INFO] Handing files over to the C++ Engine...
 
-AWS Access Key DETECTED! 
+AWS Access Key DETECTED!
    -> File: script.py (Line 14)
    -> Move this secret to the .env Vault? (y/n): y
    [OK] Line 14 mutated. Secret replaced with: os.environ.get('VAULT_SEC_1774205364')
 
 [FATAL ERROR] Commit blocked. Please review vaulted files and re-stage them.
-Simply run git add . to stage the newly mutated, safe files, and run your commit again!
 ```
-![App Screenshot](assets/Vault-Intercept.png)
-## Tech Stack
 
-* **Core Engine: C++ (Standard Template Library, <regex>, <fstream>)**
-* **Process Management: Bash Shell Scripting, Git Internals, ANSI Escape Codes**
-* **Architecture: Custom CLI Tooling, OS-level Exit Code routing**
+After vaulting, simply re-stage the mutated files and commit again:
+```bash
+git add .
+git commit -m "Added database connection"
+```
 
 ---
 
-Built by Aadesh Chaudhari
+## Project Structure
+
+```
+devsecops-vault/
+├── main.cpp              # Core C++ scanning and mutation engine
+├── install.sh            # Automated installer and hook wiring script
+├── hooks_source/
+│   └── pre-commit        # Git pre-commit hook (Bash)
+├── test.js               # Sample file for testing detection
+└── README.md
+```
+
+---
+
+## Extending the Pattern Dictionary
+
+To add new secret types, open `main.cpp` and append to `SECRET_PATTERNS`:
+
+```cpp
+const std::regex GITHUB_REGEX("ghp_[0-9a-zA-Z]{36}");
+
+const std::vector<std::pair<std::string, std::regex>> SECRET_PATTERNS = {
+    {"AWS Access Key",    AWS_REGEX},
+    {"Stripe Live Token", STRIPE_REGEX},
+    {"GitHub PAT",        GITHUB_REGEX},  // ← add new patterns here
+};
+```
+
+Recompile after any changes:
+```bash
+g++ main.cpp -o vault_scanner
+```
+
+---
+
+## Tech Stack
+
+| Layer              | Technology                                      |
+|--------------------|-------------------------------------------------|
+| Core Engine        | C++11 (STL, `<regex>`, `<fstream>`, `<ctime>`) |
+| Hook Orchestration | Bash, Git Internals (`git diff --cached`)       |
+| Terminal UX        | ANSI Escape Codes                               |
+| Process Control    | OS-level exit codes (`0` / `1`)                 |
+
+---
+
+Built by [Aadesh Chaudhari](https://github.com/aadesh006)
